@@ -19,6 +19,8 @@ void heartbeat(void* notUsed);
 int main(){
 	gpio_init(LED_PIN);
 	gpio_set_dir(LED_PIN, GPIO_OUT);
+	gpio_init(9);
+	gpio_set_dir(9, GPIO_OUT);
 	motor_init();
 
 
@@ -31,8 +33,11 @@ int main(){
 
 void motor_test(void* notUsed){
 	while(1){
-		motor_move(1000);
+		gpio_put(9, 1);
+		// motor_move(1000);
 		vTaskDelay(5);
+		gpio_put(9, 0);
+		vTaskDelay(50);
 	}
 }
 
