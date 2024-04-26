@@ -1,66 +1,81 @@
-//Caleb's code here
 #include <stdio.h>
+#include <stdint.h>
+
 #include <FreeRTOS.h>
 #include <task.h>
 #include <semphr.h>
+
 #include "hardware/gpio.h"
 #include "pico/stdlib.h"
+
 #include "motor.h"
 #include "pwm.h"
-
 
 const uint8_t LED_PIN = 25;
 
 
-void motor_test (void* notUsed);
-void heartbeat(void* notUsed);
 
-
-int main(){
-	gpio_init(LED_PIN);
-	gpio_set_dir(LED_PIN, GPIO_OUT);
-	gpio_init(9);
-	gpio_set_dir(9, GPIO_OUT);
-	motor_init();
-
-
-	xTaskCreate(heartbeat, "LED_Task", 256, NULL, 1, NULL);
-	xTaskCreate(motor_test, "motor", 256, NULL, 2, NULL);
-
-	vTaskStartScheduler();
+void hardware_init(void)
+{
+    const uint LED_PIN = PICO_DEFAULT_LED_PIN;
+    gpio_init(LED_PIN);
+    gpio_set_dir(LED_PIN, GPIO_OUT);
 }
 
 
+extern double Kp, Ki, Kd;
 void motor_test(void* notUsed){
+	Kp = 1;
+	Ki = 0;
+	Kd = 0;
+	motor_move(75);
+	int previous_error = 0;
+	int integral = 0;
+	int setpoint = 5000;//
+	int dt = 50;
 	while(1){
-		gpio_put(9, 1);
-		// motor_move(1000);
-		vTaskDelay(5);
-		gpio_put(9, 0);
-		vTaskDelay(50);
+		int measured_value = motor_get_position();
+		int error = setpoint - measured_value;
+		int proportional = error;
+		integral = integral + error * dt;
+		double derivative = (double)(error - previous_error) / dt;
+		double output = Kp * proportional + Ki * integral + (double)Kd * derivative;
+		previous_error = error;
+		printf("Output = %lf\n", output);
+		vTaskDelay(dt);
+		setpoint = motor_get_position() + 5000;
+
+
+		// printf("Pos = %i\n", motor_get_position());
+	    // motor_move(1000);
+        // motor_get_position();
+        // vTaskDelay(5);
+        // motor_move(1000);
+        // motor_get_position();
 	}
 }
 
 
-void led_control(bool isOn, uint8_t whichLED){
-    gpio_put(whichLED, isOn);
-}
+void heartbeat(void * notUsed)
+{
+    while (true) {
+        gpio_put(LED_PIN, 1);
+        vTaskDelay(50);
+        gpio_put(LED_PIN, 0);
+        vTaskDelay(50);
 
-
-void flash_LED(int count, int freq, uint8_t whichLED){
-    int time = 500/freq;
-    for(int i = 0; i < count; i++){
-        led_control(1, whichLED);
-        vTaskDelay(time);
-        led_control(0, whichLED);
-        vTaskDelay(time);
     }
 }
 
+int main()
+{
+    stdio_init_all();
+    hardware_init();
+    motor_init();
+    xTaskCreate(heartbeat, "LED_Task", 256, NULL, 1, NULL);
+    xTaskCreate(motor_test, "Motor_Task",256,NULL,2,NULL);
+    vTaskStartScheduler();
 
-void heartbeat(void* notUsed){
-    for(int count = 0;; count++) {
-        printf("tick <%i>\n", count);
-        flash_LED(1, 1, LED_PIN);
-    }
+    while(1)
+    {};   
 }
