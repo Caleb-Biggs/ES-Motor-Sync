@@ -10,9 +10,9 @@
 #include "motor.h"
 #include "pwm.h"
 
-double Kp = 0;
-double Ki = 0;
-double Kd = 0;
+// double Kp = 0;
+// double Ki = 0;
+// double Kd = 0;
 
 typedef enum {
         IRQ_LEVEL_LOW =  0x1,
@@ -47,7 +47,7 @@ static uint32_t _velocityNext = 0;
 
 static motor_status_t _motor_status = M_IDLE;
 
-static int32_t _motorSetpointPosition = 0;
+static int32_t _motorSetpointPosition = 120000;
 
 void phase_change_irq(unsigned int gpio, long unsigned int event);
 static uint32_t _readTimer(void);
@@ -70,7 +70,7 @@ void motorDrive(int32_t drive)
     
     int32_t duty = abs(drive);
 
-#if 0
+#if 1
     //
     // Deadband is a real effect of using DC motors.  There is a minimum PWM percentage that will 
     // overcome the friction of a motor to start (stiction).  In a real control system you would 
@@ -79,8 +79,9 @@ void motorDrive(int32_t drive)
     // 
     // See https://www.wescottdesign.com/articles/Friction/friction.pdf for a 
     //
-#define DEADBAND 50
-    duty = (duty * (100 - DEADBAND) / 100);
+#define DEADBAND 60
+    duty = DEADBAND + ((duty * (100-DEADBAND)/100));
+    // duty = (duty * (100 - DEADBAND) / 100);
 #endif
 
     setPWMDuty(duty);
@@ -89,18 +90,20 @@ void motorDrive(int32_t drive)
 }
 
 
-static void _pidPositionServo( void *notUsed )
+/*static*/ void _pidPositionServo( void *notUsed )
 {
     int previous_error = 0;
     double integral = 0;
     int dt=1;
 
     //Alex and Anna's Values: Kp=.5, Ki=1.1, Kd=1.6
-    // double Kp = 0.0; // TODO You will need to discover these three parameters
-    // double Ki = 0.0;
-    // double Kd = 0.0;
+    //Kp oscillates at 0.5
+    double Kp = 0.25; // TODO You will need to discover these three parameters
+    double Ki = 0.0007;//0000
+    // double Ki = 10;
+    double Kd = 0;
 
-    while(1)
+    for(int i = 0;;i++)
     {
         int error = _motorSetpointPosition - _encoder;
         integral = integral + error*dt;
@@ -112,19 +115,21 @@ static void _pidPositionServo( void *notUsed )
         motorDrive(drive);
         previous_error = error;
 
-#if 0
+#if 1
         //
         // This printf is very noisy but gives a good picture of the drive (-99 -- 99) 
         // during tuning  It also takes a fair amount of time to process and can screw up the dt 
         // timing of the PID loop.
         //
-        printf("  !! sp:%d, mp:%d, d:%d, e:%d, t:%u, v:%d\n", 
+        if(i % 101 == 0) printf("  !! sp:%d, mp:%d, d:%d, e:%d, t:%u, v: output: %lf\n", 
                 _motorSetpointPosition, 
                 _encoder, 
                 drive, 
                 (uint32_t)error,
                 _readTimer(),
-                motor_get_velocity());
+                output
+                // ,motor_get_velocity()
+                );
 
 #endif
 
