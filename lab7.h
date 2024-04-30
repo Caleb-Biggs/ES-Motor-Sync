@@ -44,6 +44,9 @@ const uint8_t STAT_REG = 11;
 
 //Pins
 const uint8_t LED_PIN = 25;
+const uint8_t SW1_PIN = 15;
+const uint8_t SW2_PIN = 14;
+
 const uint8_t MOSI_PIN = 19;
 const uint8_t CLK_PIN = 18;
 const uint8_t CS_PIN = 17;	
@@ -77,10 +80,16 @@ typedef enum REG_ARG { READ_REG, OVERWRITE_REG, AND_REG, OR_REG } REG_ARG;
 typedef struct REG_UPDATE { uint8_t* reg; uint8_t val; REG_ARG arg; } reg_update;
 
 
+//Shared Functions
 void hardware_init();
 void heartbeat(void * notUsed);
 void gpio_int_callback(uint gpio, uint32_t events);
 
+//Master Functions
+void master_spi(void* notUsed);
+void motor_cycle(void* notUsed);
+
+//Slave Functions
 void slave_state(void* notUsed);
 void update_registers(void* notUsed);
 uint8_t registers(REG_ARG mode, uint8_t reg, uint8_t val);

@@ -14,27 +14,45 @@
 |Master Functions|
 \****************/
 #if 1
-//8 Got no errors with no delay between commands in the master and
-//Set to 80 for debugging purposes
-#define SLEEP 80
-#define send_bit(pin, bit){\
-	sleep_us(SLEEP);\
-	gpio_put((pin), (bit));\
-}
 
+typedef struct SWITCH_ARGS { uint8_t pin; } sw_args;
+void switch_handler(void* args){
+	const uint8_t pollRate = 10;
 
-void master_spi(void* notUsed);
-
-void motor_cycle(void* notUsed){
-	const uint8_t NUM_POSITIONS = 9;
-	int32_t positions[] = {435, 870, 1305, 1740, 3480, 5220, -5220, -3480, 0};
+	bool pressed1 = false;
+	bool pressed2 = false;
 	while(1){
-		for(int i = 0; i < NUM_POSITIONS; i++){
-			motor_move(positions[i]);
-			while(abs(positions[i] - motor_get_position()) > 10) vTaskDelay(1);
-			// vTaskDelay(1000);
+		if(!gpio_get(SW1_PIN) && !gpio_get(SW2_PIN)){
+			printf("Both pressed\n");
+			pressed1 = true;
+			pressed2 = true;
+		} else if(!gpio_get(SW1_PIN) && !pressed1){
+			printf("SW1 Pressed\n");
+			pressed1 = true;
+			pressed2 = false;
+		} else if(!gpio_get(SW2_PIN) && !pressed2){
+			printf("SW2 Pressed\n");
+			pressed1 = false;
+			pressed2 = true;
+		} else {
+			if(gpio_get(SW1_PIN)){
+				pressed1 = false;
+			}
+			if(gpio_get(SW2_PIN)){
+				pressed2 = false;
+			}
 		}
+		vTaskDelay(pollRate);
 	}
+
+
+
+	// uint8_t swPin = ((sw_args*)args)->pin;
+	// while(1){
+	// 	while(gpio_get(swPin)) vTaskDelay(pollRate);
+	// 	printf("%i Pressed\n", swPin);
+	// 	while(!gpio_get(swPin)) vTaskDelay(pollRate);
+	// }
 }
 
 
@@ -45,9 +63,77 @@ int main(){
     xTaskCreate(heartbeat, "LED_Task", 256, NULL, tskIDLE_PRIORITY, NULL);
     xTaskCreate(motor_cycle, "Motor_Task",256,NULL,2,NULL);
     xTaskCreate(master_spi, "Master SPI", 256, NULL, tskIDLE_PRIORITY+3, NULL);
+    // xTaskCreate(switch_handler, "Switch 1", 256, &(sw_args){SW1_PIN}, tskIDLE_PRIORITY+4, NULL);
+    // xTaskCreate(switch_handler, "Switch 2", 256, &(sw_args){SW2_PIN}, tskIDLE_PRIORITY+4, NULL);
     vTaskStartScheduler();
 
     while(1);
+}
+
+
+void init_helper(uint8_t pin, bool dir, bool isInterrupt){
+    gpio_init(pin);
+    gpio_set_dir(pin, dir);
+    if(!isInterrupt) return;
+    gpio_set_irq_enabled_with_callback(pin, GPIO_IRQ_EDGE_FALL, true, &gpio_int_callback);
+    gpio_set_irq_enabled_with_callback(pin, GPIO_IRQ_EDGE_RISE, true, &gpio_int_callback);
+}
+
+
+void hardware_init(){
+	init_helper(LED_PIN, GPIO_OUT, false);
+	init_helper(SW1_PIN, GPIO_IN, false);
+	gpio_pull_up(SW1_PIN);
+	init_helper(SW2_PIN, GPIO_IN, false);
+	gpio_pull_up(SW2_PIN);
+
+	init_helper(CS_PIN, GPIO_OUT, false);
+    init_helper(CLK_PIN, GPIO_OUT, false);
+    init_helper(MOSI_PIN, GPIO_OUT, false);
+    init_helper(MISO_PIN, GPIO_IN, false);
+    gpio_put(CS_PIN, 1);
+}
+
+
+void heartbeat(void * notUsed){
+    while(1){
+        gpio_put(LED_PIN, 1);
+        vTaskDelay(250);
+        gpio_put(LED_PIN, 0);
+        vTaskDelay(750);
+    }
+}
+
+
+////////////////////
+//Motor Functions///
+
+void motor_cycle(void* notUsed){
+	const uint8_t NUM_POSITIONS = 9;
+	int32_t positions[] = {435, 870, 1305, 1740, 3480, 5220, -5220, -3480, 0};
+	while(1){
+		for(int i = 0; i < NUM_POSITIONS; i++){
+			motor_move(positions[i]);
+			//Automatically cycle from one position to the next
+			while(abs(positions[i] - motor_get_position()) > 10) vTaskDelay(1);
+			//Cycle every second
+			// vTaskDelay(1000);
+			//Cycle on switch
+			//
+		}
+	}
+}
+
+
+////////////////////
+//SPI Functions/////
+
+//8 Got no errors with no delay between commands in the master and
+//Set to 80 for debugging purposes
+#define SLEEP 80
+#define send_bit(pin, bit){\
+	sleep_us(SLEEP);\
+	gpio_put((pin), (bit));\
 }
 
 
@@ -55,7 +141,6 @@ uint8_t read_byte(){
     uint8_t output = 0;
     for(int i = 0; i < 8; i++){
         send_bit(CLK_PIN, 1);
-        // gpio_put(CLK_PIN, 1);
         uint8_t a = gpio_get(MISO_PIN);
         output <<= 1;
         output |= a;
@@ -101,30 +186,13 @@ void master_spi(void* notUsed){
 }
 
 
-void init_helper(uint8_t pin, bool dir){
-    gpio_init(pin);
-    gpio_set_dir(pin, dir);
+////////////////////
+//Interrupts////////
+
+void gpio_int_callback(uint gpio, uint32_t events){
 }
 
 
-void hardware_init(){
-	init_helper(LED_PIN, GPIO_OUT);
-	init_helper(CS_PIN, GPIO_OUT);
-    init_helper(CLK_PIN, GPIO_OUT);
-    init_helper(MOSI_PIN, GPIO_OUT);
-    init_helper(MISO_PIN, GPIO_IN);
-    gpio_put(CS_PIN, 1);
-}
-
-
-void heartbeat(void * notUsed){
-    while(1){
-        gpio_put(LED_PIN, 1);
-        vTaskDelay(250);
-        gpio_put(LED_PIN, 0);
-        vTaskDelay(750);
-    }
-}
 
 
 

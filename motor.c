@@ -86,7 +86,7 @@ static void _pidPositionServo( void *notUsed )
 {
     int previous_error = 0;
     double integral = 0;
-    int dt=1;
+    int dt=10;
 
     for(int i = 0;;i++)
     {
@@ -100,7 +100,7 @@ static void _pidPositionServo( void *notUsed )
         motorDrive(drive);
         previous_error = error;
 
-#if 1
+#if 0
         //
         // This printf is very noisy but gives a good picture of the drive (-99 -- 99) 
         // during tuning  It also takes a fair amount of time to process and can screw up the dt 
@@ -120,7 +120,7 @@ static void _pidPositionServo( void *notUsed )
 
 #endif
 
-        vTaskDelay(1);
+        vTaskDelay(10);
         //vTaskDelayUntil( &xLastWakeTime, dt);        
     }
 }
@@ -201,6 +201,7 @@ int32_t motor_get_velocity(void)
 
 void phase_change_irq(unsigned int gpio, long unsigned int event) 
 {
+    printf("phase_change_irq\n");
     gpio_put(PULSE_PIN, 1);
 
     // Manufacture PHA and PHB state.
@@ -324,6 +325,7 @@ void motor_speed_limit(motor_speed_t speed)
 
 void motor_move(uint32_t pos_in_tics)
 {
+    
     motor_set_position(pos_in_tics);
 }
 
