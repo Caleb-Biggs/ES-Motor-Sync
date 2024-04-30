@@ -96,11 +96,8 @@ void motorDrive(int32_t drive)
     double integral = 0;
     int dt=1;
 
-    //Alex and Anna's Values: Kp=.5, Ki=1.1, Kd=1.6
-    //Kp oscillates at 0.5
-    double Kp = 0.25; // TODO You will need to discover these three parameters
-    double Ki = 0.0007;//0000
-    // double Ki = 10;
+    double Kp = 0.8;
+    double Ki = 0;
     double Kd = 0;
 
     for(int i = 0;;i++)
@@ -115,7 +112,7 @@ void motorDrive(int32_t drive)
         motorDrive(drive);
         previous_error = error;
 
-#if 1
+#if 0
         //
         // This printf is very noisy but gives a good picture of the drive (-99 -- 99) 
         // during tuning  It also takes a fair amount of time to process and can screw up the dt 
