@@ -25,20 +25,26 @@
 
 void master_spi(void* notUsed);
 
-void motor_test(void* notUsed){
-	_pidPositionServo();
-	// motor_move(25);
-	while(1) vTaskDelay(1000);
+void motor_cycle(void* notUsed){
+	const uint8_t NUM_POSITIONS = 9;
+	int32_t positions[] = {435, 870, 1305, 1740, 3480, 5220, -5220, -3480, 0};
+	while(1){
+		for(int i = 0; i < NUM_POSITIONS; i++){
+			motor_move(positions[i]);
+			while(abs(positions[i] - motor_get_position()) > 10) vTaskDelay(1);
+			// vTaskDelay(1000);
+		}
+	}
 }
 
 
 int main(){
     stdio_init_all();
     hardware_init();
-    motor_init();
-    xTaskCreate(heartbeat, "LED_Task", 256, NULL, 1, NULL);
-    // xTaskCreate(motor_test, "Motor_Task",256,NULL,2,NULL);
-    xTaskCreate(master_spi, "Master SPI", 256, NULL, 3, NULL);
+    motor_init(0.8, 0, 0);
+    xTaskCreate(heartbeat, "LED_Task", 256, NULL, tskIDLE_PRIORITY, NULL);
+    xTaskCreate(motor_cycle, "Motor_Task",256,NULL,2,NULL);
+    xTaskCreate(master_spi, "Master SPI", 256, NULL, tskIDLE_PRIORITY+3, NULL);
     vTaskStartScheduler();
 
     while(1);
@@ -86,10 +92,10 @@ uint8_t send_command(uint8_t byte1, uint8_t byte2){
 void master_spi(void* notUsed){
 	while(1){
 		send_command(LED_REG|WRITE_COM, 0xF0);
-        printf("Wrote 1s: %b\n", send_command(LED_REG|READ_COM,0));
+        // printf("Wrote 1s: %b\n", send_command(LED_REG|READ_COM,0));
         vTaskDelay(500);
         send_command(LED_REG|WRITE_COM, 0x00);
-        printf("Wrote 0s: %b\n", send_command(LED_REG|READ_COM,0));
+        // printf("Wrote 0s: %b\n", send_command(LED_REG|READ_COM,0));
         vTaskDelay(500);
 	}
 }

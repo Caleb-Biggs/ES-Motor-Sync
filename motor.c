@@ -10,10 +10,6 @@
 #include "motor.h"
 #include "pwm.h"
 
-// double Kp = 0;
-// double Ki = 0;
-// double Kd = 0;
-
 typedef enum {
         IRQ_LEVEL_LOW =  0x1,
         IRQ_LEVEL_HIGH = 0x2,
@@ -33,17 +29,13 @@ const uint8_t PULSE_PIN = 0;
 
 #define VELO_SAMPLES 16
 
-/*
-** There are much better templates in C++ but
-** these will work here just fine.
-*/
-#define min(x, y) (((x) > (y)) ? (y) : (x))
-#define max(x, y) (((x) < (y)) ? (x) : (y))
-#define abs(x)    ((x) < 0) ? ((x) * -1) : (x)
-
 static int32_t _encoder = 0;
 static uint32_t _velocitySamples[VELO_SAMPLES];
 static uint32_t _velocityNext = 0;
+
+static double Kp = 0.8;
+static double Ki = 0;
+static double Kd = 0;
 
 static motor_status_t _motor_status = M_IDLE;
 
@@ -90,15 +82,11 @@ void motorDrive(int32_t drive)
 }
 
 
-/*static*/ void _pidPositionServo( void *notUsed )
+static void _pidPositionServo( void *notUsed )
 {
     int previous_error = 0;
     double integral = 0;
     int dt=1;
-
-    double Kp = 0.8;
-    double Ki = 0;
-    double Kd = 0;
 
     for(int i = 0;;i++)
     {
@@ -112,13 +100,14 @@ void motorDrive(int32_t drive)
         motorDrive(drive);
         previous_error = error;
 
-#if 0
+#if 1
         //
         // This printf is very noisy but gives a good picture of the drive (-99 -- 99) 
         // during tuning  It also takes a fair amount of time to process and can screw up the dt 
         // timing of the PID loop.
         //
-        if(i % 101 == 0) printf("  !! sp:%d, mp:%d, d:%d, e:%d, t:%u, v: output: %lf\n", 
+        if(i % 101 == 0) {
+            printf("  !! sp:%d, mp:%d, d:%d, e:%d, t:%u, v: output: %lf\n", 
                 _motorSetpointPosition, 
                 _encoder, 
                 drive, 
@@ -127,6 +116,7 @@ void motorDrive(int32_t drive)
                 output
                 // ,motor_get_velocity()
                 );
+        }
 
 #endif
 
@@ -136,7 +126,7 @@ void motorDrive(int32_t drive)
 }
 
 
-void motor_init(void)
+void motor_init(double setKp, double setKi, double setKd)
 {
     printf("%s: \n", __func__);
 
@@ -163,8 +153,10 @@ void motor_init(void)
     setPWMDuty(33);
     // _setupTimer();
 
+    Kp = setKp; Ki = setKi; Kd = setKd;
 
-#if 0
+
+#if 1
     xTaskCreate(_pidPositionServo,
                 "bid",
                 1024,   
@@ -332,7 +324,7 @@ void motor_speed_limit(motor_speed_t speed)
 
 void motor_move(uint32_t pos_in_tics)
 {
-    motorDrive(pos_in_tics);
+    motor_set_position(pos_in_tics);
 }
 
 int32_t motor_get_position(void)
