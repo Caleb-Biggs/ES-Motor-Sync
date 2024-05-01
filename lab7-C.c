@@ -16,55 +16,70 @@
 #if 1
 
 typedef struct SWITCH_ARGS { uint8_t pin; } sw_args;
-void switch_handler(void* args){
-	const uint8_t pollRate = 10;
+typedef enum SWITCH_STATE {SW_NONE, SW_1, SW_2, SW_BOTH, SW_BETW_1, SW_BETW_2} sw_state;
 
-	bool pressed1 = false;
-	bool pressed2 = false;
+
+bool switch_state_change(sw_state* state, bool sw1Cond, sw_state trans1, bool sw2Cond, sw_state trans2){
+	if(gpio_get(SW1_PIN) == sw1Cond){
+		*state = trans1;
+		return true;
+	} 
+	if(gpio_get(SW2_PIN) == sw2Cond){
+		*state = trans2;
+		return true;
+	}
+	return false;
+}
+
+
+void switch_handler(void* args){
+	const uint8_t pollRate = 30;
+	sw_state state = 0;
+	bool change = false;
 	while(1){
-		if(!gpio_get(SW1_PIN) && !gpio_get(SW2_PIN)){
-			printf("Both pressed\n");
-			pressed1 = true;
-			pressed2 = true;
-		} else if(!gpio_get(SW1_PIN) && !pressed1){
-			printf("SW1 Pressed\n");
-			pressed1 = true;
-			pressed2 = false;
-		} else if(!gpio_get(SW2_PIN) && !pressed2){
-			printf("SW2 Pressed\n");
-			pressed1 = false;
-			pressed2 = true;
-		} else {
-			if(gpio_get(SW1_PIN)){
-				pressed1 = false;
-			}
-			if(gpio_get(SW2_PIN)){
-				pressed2 = false;
-			}
+		switch(state){
+			case SW_NONE:
+				if(change){
+					printf("Both released\n");
+				}
+				change = switch_state_change(&state, 0, SW_1, 0, SW_2);
+				break;
+			case SW_1:
+				if(change){ 
+					printf("SW1 pressed\n");
+				}
+				change = switch_state_change(&state, 1, SW_NONE, 0, SW_BOTH);
+				break;
+			case SW_2:
+				if(change){
+					printf("SW2 pressed\n");
+				}
+				change = switch_state_change(&state, 0, SW_BOTH, 1, SW_NONE);
+				break;
+			case SW_BOTH:
+				if(change){
+					printf("Both pressed\n");
+				}
+				change = switch_state_change(&state, 1, SW_BETW_1, 1, SW_BETW_2);
+				break;
+			case SW_BETW_1: change = switch_state_change(&state, 0, SW_BOTH, 1, SW_NONE); break;
+			case SW_BETW_2: change = switch_state_change(&state, 1, SW_NONE, 0, SW_BOTH); break;
 		}
 		vTaskDelay(pollRate);
 	}
-
-
-
-	// uint8_t swPin = ((sw_args*)args)->pin;
-	// while(1){
-	// 	while(gpio_get(swPin)) vTaskDelay(pollRate);
-	// 	printf("%i Pressed\n", swPin);
-	// 	while(!gpio_get(swPin)) vTaskDelay(pollRate);
-	// }
 }
 
 
 int main(){
     stdio_init_all();
     hardware_init();
-    motor_init(0.8, 0, 0);
+    // motor_init(0.8, 0, 0); // Master Motor
+    // motor_init(0.85, 0, 0); //Slave Motor
     xTaskCreate(heartbeat, "LED_Task", 256, NULL, tskIDLE_PRIORITY, NULL);
-    xTaskCreate(motor_cycle, "Motor_Task",256,NULL,2,NULL);
-    xTaskCreate(master_spi, "Master SPI", 256, NULL, tskIDLE_PRIORITY+3, NULL);
-    // xTaskCreate(switch_handler, "Switch 1", 256, &(sw_args){SW1_PIN}, tskIDLE_PRIORITY+4, NULL);
-    // xTaskCreate(switch_handler, "Switch 2", 256, &(sw_args){SW2_PIN}, tskIDLE_PRIORITY+4, NULL);
+    // xTaskCreate(motor_cycle, "Motor_Task",256,NULL,tskIDLE_PRIORITY+3,NULL);
+    xTaskCreate(master_spi, "Master SPI", 256, NULL, tskIDLE_PRIORITY+4, NULL);
+    xTaskCreate(switch_handler, "Switch 1", 256, &(sw_args){SW1_PIN}, tskIDLE_PRIORITY+5, NULL);
+    // xTaskCreate(switch_handler, "Switch 2", 256, &(sw_args){SW2_PIN}, tskIDLE_PRIORITY+5, NULL);
     vTaskStartScheduler();
 
     while(1);
@@ -113,11 +128,12 @@ void motor_cycle(void* notUsed){
 	int32_t positions[] = {435, 870, 1305, 1740, 3480, 5220, -5220, -3480, 0};
 	while(1){
 		for(int i = 0; i < NUM_POSITIONS; i++){
+			// printf("Moving to %i\n", positions[i]);
 			motor_move(positions[i]);
 			//Automatically cycle from one position to the next
-			while(abs(positions[i] - motor_get_position()) > 10) vTaskDelay(1);
-			//Cycle every second
-			// vTaskDelay(1000);
+			// while(abs(positions[i] - motor_get_position()) > 10) vTaskDelay(1);
+			//Cycle every two seconds
+			vTaskDelay(2000);
 			//Cycle on switch
 			//
 		}

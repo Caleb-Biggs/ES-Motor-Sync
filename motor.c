@@ -86,7 +86,7 @@ static void _pidPositionServo( void *notUsed )
 {
     int previous_error = 0;
     double integral = 0;
-    int dt=10;
+    int dt=1;
 
     for(int i = 0;;i++)
     {
@@ -120,7 +120,7 @@ static void _pidPositionServo( void *notUsed )
 
 #endif
 
-        vTaskDelay(10);
+        vTaskDelay(1);
         //vTaskDelayUntil( &xLastWakeTime, dt);        
     }
 }
@@ -182,7 +182,7 @@ uint32_t get_postion(void)
 
 void motor_set_position(int32_t position)
 {
-    printf("%s: position: %d", __func__, position);
+    printf("%s: position: %d\n", __func__, position);
     _motorSetpointPosition = position;
 }
 
@@ -201,7 +201,7 @@ int32_t motor_get_velocity(void)
 
 void phase_change_irq(unsigned int gpio, long unsigned int event) 
 {
-    printf("phase_change_irq\n");
+    // printf("phase_change_irq\n");
     gpio_put(PULSE_PIN, 1);
 
     // Manufacture PHA and PHB state.
