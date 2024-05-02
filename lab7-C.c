@@ -39,6 +39,13 @@ int main(){
 }
 
 
+void ext_LED(uint8_t color){
+	gpio_put(RED_LED_PIN, (color == RED_LED_PIN));
+	gpio_put(GRN_LED_PIN, (color == GRN_LED_PIN));
+	gpio_put(BLU_LED_PIN, (color == BLU_LED_PIN));
+}
+
+
 void init_helper(uint8_t pin, bool dir, bool isInterrupt){
     gpio_init(pin);
     gpio_set_dir(pin, dir);
@@ -53,6 +60,7 @@ void hardware_init(){
 	init_helper(RED_LED_PIN, GPIO_OUT, false);
 	init_helper(GRN_LED_PIN, GPIO_OUT, false);
 	init_helper(BLU_LED_PIN, GPIO_OUT, false);
+	ext_LED(RED_LED_PIN);
 
 	init_helper(SW1_PIN, GPIO_IN, false);
 	gpio_pull_up(SW1_PIN);
@@ -82,41 +90,33 @@ void heartbeat(void * notUsed){
 
 void motor_cycle(void* notUsed){
 	uint8_t posInst;
-	uint32_t next = 0;
 	const uint8_t NUM_POSITIONS = 9;
 	int32_t positions[] = {0, 435, 870, 1305, 1740, 3480, 5220, -5220, -3480};
-	motor_move(0);
-	do{ xQueueReceive(positionQueue, &posInst, portMAX_DELAY); } 
-	while(posInst != NEXT_POS);
-	while(1){
-		for(int i = 0;;){
+	
+	for(int i = 0;;){
+		do{ xQueueReceive(positionQueue, &posInst, portMAX_DELAY); } 
+		while(posInst != NEXT_POS);
+		ext_LED(GRN_LED_PIN);
+		while(posInst != STOP_POS){
+			xQueueReceive(positionQueue, &posInst, portMAX_DELAY);
 			switch(posInst){
-				case NEXT_POS: 
+				case NEXT_POS:
+					set_motor_status(M_BUSY);
+					ext_LED(GRN_LED_PIN);
 					i = (i+1)%NUM_POSITIONS;
+					motor_move(positions[i]);
 					break;
 				case PREV_POS: 
-					i = (i-1)%NUM_POSITIONS; 
-					if(i < 0) i = NUM_POSITIONS+i; 
+					set_motor_status(M_BUSY);
+					i = (i-1+NUM_POSITIONS)%NUM_POSITIONS; //adding NUM_POSITIONS ensures value stays positive
+					motor_move(positions[i]);
 					break;
-				case STOP_POS: 
-					next = motor_get_position();
-					continue;
+				case STOP_POS:
+					set_motor_status(M_IDLE);
+					ext_LED(RED_LED_PIN);
+					motor_move(motor_get_position());
+					break;
 			}
-			next = positions[i];
-
-			motor_move(next);
-			xQueueReceive(positionQueue, &posInst, portMAX_DELAY);
-
-			// printf("Moving to %i\n", positions[i]);
-
-			//Automatically cycle from one position to the next
-			// while(abs(positions[i] - motor_get_position()) > 10) vTaskDelay(1);
-			
-			//Cycle every two seconds
-
-			// vTaskDelay(2000);
-			//Cycle on switch
-			//
 		}
 	}
 }
@@ -208,7 +208,7 @@ void switch_handler(void* args){
 	const uint8_t pollRate = 30;
 	sw_state state = SW_NONE;
 	bool change = false;
-	while(1){
+	for(int i = 0;;){
 		switch(state){
 			case SW_NONE:
 				if(change) printf("Both released\n");
@@ -223,7 +223,8 @@ void switch_handler(void* args){
 				change = switch_state_change(&state, 0, SW_BOTH, 1, SW_NONE);
 				break;
 			case SW_BOTH:
-				if(change) printf("Both pressed\n");
+				if(change) i = 0;
+				else if(i++ >= 500/pollRate) xQueueSendToBack(positionQueue, &STOP_POS, portMAX_DELAY);			
 				change = switch_state_change(&state, 1, SW_BETW_1, 1, SW_BETW_2);
 				break;
 			case SW_BETW_1: change = switch_state_change(&state, 0, SW_BOTH, 1, SW_NONE); break;

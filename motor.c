@@ -3,6 +3,7 @@
 
 #include <FreeRTOS.h> 
 #include <task.h>
+#include <semphr.h>
 
 #include "hardware/gpio.h"
 #include "pico/stdlib.h"
@@ -39,7 +40,9 @@ static double Kd = 0;
 
 static motor_status_t _motor_status = M_IDLE;
 
-static int32_t _motorSetpointPosition = 120000;
+static int32_t _motorSetpointPosition = 0;
+
+static QueueHandle_t motorInstruction;
 
 void phase_change_irq(unsigned int gpio, long unsigned int event);
 static uint32_t _readTimer(void);
@@ -84,44 +87,49 @@ void motorDrive(int32_t drive)
 
 static void _pidPositionServo( void *notUsed )
 {
+    motor_status_t status;
     int previous_error = 0;
     double integral = 0;
     int dt=1;
+    while(1){
+        xQueueReceive(motorInstruction, &status, portMAX_DELAY);
+        // printf("Speed: ")
+        for(;status == M_BUSY;)
+        {
+            int error = _motorSetpointPosition - _encoder;
+            integral = integral + error*dt;
+            double derivative = (error - previous_error)/dt;
+            double output = Kp*error + Ki*integral + Kd*derivative;
+            int drive = output;
+            if (drive > 99) drive = 99;
+            if (drive < -99) drive = -99;
+            motorDrive(drive);
+            previous_error = error;
 
-    for(int i = 0;;i++)
-    {
-        int error = _motorSetpointPosition - _encoder;
-        integral = integral + error*dt;
-        double derivative = (error - previous_error)/dt;
-        double output = Kp*error + Ki*integral + Kd*derivative;
-        int drive = output;
-        if (drive > 99) drive = 99;
-        if (drive < -99) drive = -99;
-        motorDrive(drive);
-        previous_error = error;
-
-#if 0
-        //
-        // This printf is very noisy but gives a good picture of the drive (-99 -- 99) 
-        // during tuning  It also takes a fair amount of time to process and can screw up the dt 
-        // timing of the PID loop.
-        //
-        if(i % 101 == 0) {
-            printf("  !! sp:%d, mp:%d, d:%d, e:%d, t:%u, v: output: %lf\n", 
-                _motorSetpointPosition, 
-                _encoder, 
-                drive, 
-                (uint32_t)error,
-                _readTimer(),
-                output
-                // ,motor_get_velocity()
-                );
-        }
+#if 0   
+            //
+            // This printf is very noisy but gives a good picture of the drive (-99 -- 99) 
+            // during tuning  It also takes a fair amount of time to process and can screw up the dt 
+            // timing of the PID loop.
+            //
+            if(i == 0) {
+                printf("  !! sp:%d, mp:%d, d:%d, e:%d, t:%u, v: output: %lf\n", 
+                    _motorSetpointPosition, 
+                    _encoder, 
+                    drive, 
+                    (uint32_t)error,
+                    _readTimer(),
+                    output
+                    // ,motor_get_velocity()
+                    );
+            }
 
 #endif
-
-        vTaskDelay(1);
-        //vTaskDelayUntil( &xLastWakeTime, dt);        
+            xQueueReceive(motorInstruction, &status, 0);
+            vTaskDelay(1);
+            //vTaskDelayUntil( &xLastWakeTime, dt);        
+        }
+        setPWMDuty(0);
     }
 }
 
@@ -146,6 +154,8 @@ void motor_init(double setKp, double setKi, double setKd)
 
     gpio_set_irq_enabled_with_callback(PHA_PIN, GPIO_IRQ_EDGE_RISE|GPIO_IRQ_EDGE_FALL, true, &phase_change_irq);    
     gpio_set_irq_enabled(PHB_PIN, GPIO_IRQ_EDGE_RISE|GPIO_IRQ_EDGE_FALL, true);    
+
+    motorInstruction = xQueueCreate(256, sizeof(motor_status_t));
 
     ConfigurePWM(20000);
     setPWMDuty(10);
@@ -338,3 +348,5 @@ motor_status_t motor_status(void)
 {
     return _motor_status;
 }
+
+void set_motor_status(motor_status_t status){ xQueueSendToBack(motorInstruction, &status, portMAX_DELAY); }
