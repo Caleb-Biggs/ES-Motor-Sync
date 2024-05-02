@@ -336,6 +336,5 @@ int32_t motor_get_position(void)
 
 motor_status_t motor_status(void)
 {
- 
     return _motor_status;
 }

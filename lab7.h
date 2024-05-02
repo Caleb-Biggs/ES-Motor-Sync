@@ -46,11 +46,20 @@ const uint8_t STAT_REG = 11;
 const uint8_t LED_PIN = 25;
 const uint8_t SW1_PIN = 15;
 const uint8_t SW2_PIN = 14;
+const uint8_t RED_LED_PIN = 20;
+const uint8_t GRN_LED_PIN = 21;
+const uint8_t BLU_LED_PIN = 22;
 
 const uint8_t MOSI_PIN = 19;
 const uint8_t CLK_PIN = 18;
 const uint8_t CS_PIN = 17;	
 const uint8_t MISO_PIN = 16;
+
+
+//Switch Stuff
+typedef struct SWITCH_ARGS { uint8_t pin; } sw_args;
+typedef enum SWITCH_STATE {SW_NONE, SW_1, SW_2, SW_BOTH, SW_BETW_1, SW_BETW_2} sw_state;
+void switch_handler(void* args);
 
 
 //Slave Error Codes

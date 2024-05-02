@@ -15,71 +15,24 @@
 \****************/
 #if 1
 
-typedef struct SWITCH_ARGS { uint8_t pin; } sw_args;
-typedef enum SWITCH_STATE {SW_NONE, SW_1, SW_2, SW_BOTH, SW_BETW_1, SW_BETW_2} sw_state;
-
-
-bool switch_state_change(sw_state* state, bool sw1Cond, sw_state trans1, bool sw2Cond, sw_state trans2){
-	if(gpio_get(SW1_PIN) == sw1Cond){
-		*state = trans1;
-		return true;
-	} 
-	if(gpio_get(SW2_PIN) == sw2Cond){
-		*state = trans2;
-		return true;
-	}
-	return false;
-}
-
-
-void switch_handler(void* args){
-	const uint8_t pollRate = 30;
-	sw_state state = 0;
-	bool change = false;
-	while(1){
-		switch(state){
-			case SW_NONE:
-				if(change){
-					printf("Both released\n");
-				}
-				change = switch_state_change(&state, 0, SW_1, 0, SW_2);
-				break;
-			case SW_1:
-				if(change){ 
-					printf("SW1 pressed\n");
-				}
-				change = switch_state_change(&state, 1, SW_NONE, 0, SW_BOTH);
-				break;
-			case SW_2:
-				if(change){
-					printf("SW2 pressed\n");
-				}
-				change = switch_state_change(&state, 0, SW_BOTH, 1, SW_NONE);
-				break;
-			case SW_BOTH:
-				if(change){
-					printf("Both pressed\n");
-				}
-				change = switch_state_change(&state, 1, SW_BETW_1, 1, SW_BETW_2);
-				break;
-			case SW_BETW_1: change = switch_state_change(&state, 0, SW_BOTH, 1, SW_NONE); break;
-			case SW_BETW_2: change = switch_state_change(&state, 1, SW_NONE, 0, SW_BOTH); break;
-		}
-		vTaskDelay(pollRate);
-	}
-}
+const uint8_t NEXT_POS = 0;
+const uint8_t PREV_POS = 1;
+const uint8_t STOP_POS = 2;
+static QueueHandle_t positionQueue;
 
 
 int main(){
     stdio_init_all();
     hardware_init();
-    // motor_init(0.8, 0, 0); // Master Motor
+    motor_init(0.8, 0, 0); // Master Motor
     // motor_init(0.85, 0, 0); //Slave Motor
+
+    positionQueue = xQueueCreate(256, sizeof(uint8_t));
+
     xTaskCreate(heartbeat, "LED_Task", 256, NULL, tskIDLE_PRIORITY, NULL);
-    // xTaskCreate(motor_cycle, "Motor_Task",256,NULL,tskIDLE_PRIORITY+3,NULL);
+    xTaskCreate(motor_cycle, "Motor_Task",256,NULL,tskIDLE_PRIORITY+3,NULL);
     xTaskCreate(master_spi, "Master SPI", 256, NULL, tskIDLE_PRIORITY+4, NULL);
-    xTaskCreate(switch_handler, "Switch 1", 256, &(sw_args){SW1_PIN}, tskIDLE_PRIORITY+5, NULL);
-    // xTaskCreate(switch_handler, "Switch 2", 256, &(sw_args){SW2_PIN}, tskIDLE_PRIORITY+5, NULL);
+    xTaskCreate(switch_handler, "Switches", 256, &(sw_args){SW1_PIN}, tskIDLE_PRIORITY+5, NULL);
     vTaskStartScheduler();
 
     while(1);
@@ -97,6 +50,10 @@ void init_helper(uint8_t pin, bool dir, bool isInterrupt){
 
 void hardware_init(){
 	init_helper(LED_PIN, GPIO_OUT, false);
+	init_helper(RED_LED_PIN, GPIO_OUT, false);
+	init_helper(GRN_LED_PIN, GPIO_OUT, false);
+	init_helper(BLU_LED_PIN, GPIO_OUT, false);
+
 	init_helper(SW1_PIN, GPIO_IN, false);
 	gpio_pull_up(SW1_PIN);
 	init_helper(SW2_PIN, GPIO_IN, false);
@@ -124,16 +81,40 @@ void heartbeat(void * notUsed){
 //Motor Functions///
 
 void motor_cycle(void* notUsed){
+	uint8_t posInst;
+	uint32_t next = 0;
 	const uint8_t NUM_POSITIONS = 9;
-	int32_t positions[] = {435, 870, 1305, 1740, 3480, 5220, -5220, -3480, 0};
+	int32_t positions[] = {0, 435, 870, 1305, 1740, 3480, 5220, -5220, -3480};
+	motor_move(0);
+	do{ xQueueReceive(positionQueue, &posInst, portMAX_DELAY); } 
+	while(posInst != NEXT_POS);
 	while(1){
-		for(int i = 0; i < NUM_POSITIONS; i++){
+		for(int i = 0;;){
+			switch(posInst){
+				case NEXT_POS: 
+					i = (i+1)%NUM_POSITIONS;
+					break;
+				case PREV_POS: 
+					i = (i-1)%NUM_POSITIONS; 
+					if(i < 0) i = NUM_POSITIONS+i; 
+					break;
+				case STOP_POS: 
+					next = motor_get_position();
+					continue;
+			}
+			next = positions[i];
+
+			motor_move(next);
+			xQueueReceive(positionQueue, &posInst, portMAX_DELAY);
+
 			// printf("Moving to %i\n", positions[i]);
-			motor_move(positions[i]);
+
 			//Automatically cycle from one position to the next
 			// while(abs(positions[i] - motor_get_position()) > 10) vTaskDelay(1);
+			
 			//Cycle every two seconds
-			vTaskDelay(2000);
+
+			// vTaskDelay(2000);
 			//Cycle on switch
 			//
 		}
@@ -209,6 +190,48 @@ void gpio_int_callback(uint gpio, uint32_t events){
 }
 
 
+bool switch_state_change(sw_state* state, bool sw1Cond, sw_state trans1, bool sw2Cond, sw_state trans2){
+	if(gpio_get(SW1_PIN) == sw1Cond){
+		*state = trans1;
+		return true;
+	} 
+	if(gpio_get(SW2_PIN) == sw2Cond){
+		*state = trans2;
+		return true;
+	}
+	return false;
+}
+
+
+void switch_handler(void* args){
+	xQueueSendToBack(positionQueue, &STOP_POS, portMAX_DELAY);
+	const uint8_t pollRate = 30;
+	sw_state state = SW_NONE;
+	bool change = false;
+	while(1){
+		switch(state){
+			case SW_NONE:
+				if(change) printf("Both released\n");
+				change = switch_state_change(&state, 0, SW_1, 0, SW_2);
+				break;
+			case SW_1:
+				if(change) xQueueSendToBack(positionQueue, &NEXT_POS, portMAX_DELAY);
+				change = switch_state_change(&state, 1, SW_NONE, 0, SW_BOTH);
+				break;
+			case SW_2:
+				if(change) xQueueSendToBack(positionQueue, &PREV_POS, portMAX_DELAY);
+				change = switch_state_change(&state, 0, SW_BOTH, 1, SW_NONE);
+				break;
+			case SW_BOTH:
+				if(change) printf("Both pressed\n");
+				change = switch_state_change(&state, 1, SW_BETW_1, 1, SW_BETW_2);
+				break;
+			case SW_BETW_1: change = switch_state_change(&state, 0, SW_BOTH, 1, SW_NONE); break;
+			case SW_BETW_2: change = switch_state_change(&state, 1, SW_NONE, 0, SW_BOTH); break;
+		}
+		vTaskDelay(pollRate);
+	}
+}
 
 
 
