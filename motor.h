@@ -21,6 +21,7 @@ void motor_init(double Kp, double Ki, double Kd, bool enableISR);
 void motor_speed_limit(motor_speed_t speed);
 void motor_move(uint32_t pos_in_tics);
 int32_t motor_get_position(void);
+int32_t get_set_position();
 motor_status_t motor_status(void);
 void set_motor_status(motor_status_t status);
 void phase_change_irq(unsigned int gpio, long unsigned int event);

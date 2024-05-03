@@ -105,7 +105,7 @@ static void _pidPositionServo( void *notUsed )
             motorDrive(drive);
             previous_error = error;
 
-#if 1   
+#if 0   
             //
             // This printf is very noisy but gives a good picture of the drive (-99 -- 99) 
             // during tuning  It also takes a fair amount of time to process and can screw up the dt 
@@ -348,3 +348,5 @@ motor_status_t motor_status(void)
 }
 
 void set_motor_status(motor_status_t status){ xQueueSendToBack(motorInstruction, &status, portMAX_DELAY); }
+
+int32_t get_set_position(){ return _motorSetpointPosition; }

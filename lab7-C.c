@@ -15,24 +15,29 @@
 /****************\
 |Master Functions|
 \****************/
-#if 0
+#if 1
 
 const uint8_t NEXT_POS = 0;
 const uint8_t PREV_POS = 1;
 const uint8_t STOP_POS = 2;
 static QueueHandle_t positionQueue;
 static QueueHandle_t SPIQueue;
+static QueueHandle_t LEDQueue;
+
+typedef struct LED_BEHAVIOR { bool R, G, B; uint8_t freq; float duty; bool doStop; } led_behavior;
 
 
 int main(){
     stdio_init_all();
     hardware_init();
-    motor_init(0.8, 0, 0);
+    motor_init(0.8, 0, 0, true);
 
     positionQueue = xQueueCreate(256, sizeof(uint8_t));
     SPIQueue = xQueueCreate(256, sizeof(spi_send));
+    LEDQueue = xQueueCreate(256, sizeof(led_behavior));
 
     xTaskCreate(heartbeat, "LED_Task", 256, NULL, tskIDLE_PRIORITY, NULL);
+    xTaskCreate(ext_LED, "External LED", 256, NULL, tskIDLE_PRIORITY+1, NULL);
     xTaskCreate(motor_cycle, "Motor_Task",256,NULL,tskIDLE_PRIORITY+3,NULL);
     xTaskCreate(master_spi, "Master SPI", 256, NULL, tskIDLE_PRIORITY+4, NULL);
     xTaskCreate(switch_handler, "Switches", 256, &(sw_args){SW1_PIN}, tskIDLE_PRIORITY+5, NULL);
@@ -42,10 +47,30 @@ int main(){
 }
 
 
-void ext_LED(uint8_t color){
-	gpio_put(RED_LED_PIN, (color == RED_LED_PIN));
-	gpio_put(GRN_LED_PIN, (color == GRN_LED_PIN));
-	gpio_put(BLU_LED_PIN, (color == BLU_LED_PIN));
+void ext_LED(void* notUsed){
+	led_behavior b = {1, 0, 0, 1, 1, false};
+	double onDur=1000, offDur=0;
+	while(1){
+		if(xQueueReceive(LEDQueue, &b, 0) == pdTRUE){
+			float cycle = 1000.0/b.freq;
+			onDur = cycle * b.duty;
+			offDur = cycle - onDur;
+		} 
+		gpio_put(RED_LED_PIN, b.R);
+		gpio_put(GRN_LED_PIN, b.G);
+		gpio_put(BLU_LED_PIN, b.B);
+		vTaskDelay(onDur);
+		gpio_put(RED_LED_PIN, 0);
+		gpio_put(GRN_LED_PIN, 0);
+		gpio_put(BLU_LED_PIN, 0);
+		vTaskDelay(offDur);
+
+		//This check doesn't make much sense to be here, but it required
+		//the least amount of change to accomplish the intended effect
+		if(b.doStop && (abs(get_set_position() - motor_get_position()) < 20)){
+			xQueueSendToBack(LEDQueue, &((led_behavior){0, 1, 0, 10, 0.9, false}), portMAX_DELAY);
+		}
+	}
 }
 
 
@@ -63,7 +88,7 @@ void hardware_init(){
 	init_helper(RED_LED_PIN, GPIO_OUT, false);
 	init_helper(GRN_LED_PIN, GPIO_OUT, false);
 	init_helper(BLU_LED_PIN, GPIO_OUT, false);
-	ext_LED(RED_LED_PIN);
+	// ext_LED(RED_LED_PIN);
 
 	init_helper(SW1_PIN, GPIO_IN, false);
 	gpio_pull_up(SW1_PIN);
@@ -95,29 +120,32 @@ void motor_cycle(void* notUsed){
 	uint8_t posInst;
 	const uint8_t NUM_POSITIONS = 9;
 	int32_t positions[] = {0, 435, 870, 1305, 1740, 3480, 5220, -5220, -3480};
-	
+	int32_t setPos = 0;
 	for(int i = 0;;){
 		do{ xQueueReceive(positionQueue, &posInst, portMAX_DELAY); } 
 		while(posInst != NEXT_POS);
-		ext_LED(GRN_LED_PIN);
+		xQueueSendToBack(LEDQueue, &((led_behavior){1, 0, 0, 10, 0.5, true}), portMAX_DELAY);
+		// ext_LED(GRN_LED_PIN);
 		while(posInst != STOP_POS){
 			xQueueReceive(positionQueue, &posInst, portMAX_DELAY);
 			switch(posInst){
 				case NEXT_POS:
 					set_motor_status(M_BUSY);
-					ext_LED(GRN_LED_PIN);
+					xQueueSendToBack(LEDQueue, &((led_behavior){1, 0, 0, 10, 0.5, true}), portMAX_DELAY);
 					i = (i+1)%NUM_POSITIONS;
-					send_motor_cmd(positions[i]);
+					send_motor_cmd(setPos = positions[i]);
 					break;
 				case PREV_POS: 
 					set_motor_status(M_BUSY);
+					xQueueSendToBack(LEDQueue, &((led_behavior){1, 0, 0, 10, 0.5, true}), portMAX_DELAY);
 					i = (i-1+NUM_POSITIONS)%NUM_POSITIONS; //adding NUM_POSITIONS ensures value stays positive
-					send_motor_cmd(positions[i]);
+					send_motor_cmd(setPos = positions[i]);
 					break;
 				case STOP_POS:
 					set_motor_status(M_IDLE);
-					ext_LED(RED_LED_PIN);
-					send_motor_cmd(motor_get_position());
+					//xQueueSendToBack(LEDQueue, &((led_behavior){1, 0, 0, 100, 1}), portMAX_DELAY);
+					// ext_LED(RED_LED_PIN);
+					send_motor_cmd(setPos = motor_get_position());
 					break;
 			}
 		}
@@ -128,7 +156,7 @@ void motor_cycle(void* notUsed){
 ////////////////////
 //SPI Functions/////
 
-void send_motor_cmd(uint32_t pos){
+void send_motor_cmd(int32_t pos){
 	// xQueueSendToBack(SPIQueue, &((spi_send){MOTOR_CMD_0, pos&0xFF}), portMAX_DELAY);
 	// xQueueSendToBack(SPIQueue, &((spi_send){MOTOR_CMD_8, (pos>>8)&0xFF}), portMAX_DELAY);
 	// xQueueSendToBack(SPIQueue, &((spi_send){MOTOR_CMD_16, (pos>>16)&0xFF}), portMAX_DELAY);
@@ -271,7 +299,7 @@ int main(){
     motor_init(0.85, 0, 0, false); //Slave Motor
     hardware_init();
 
-    set_motor_status(M_BUSY);
+    // set_motor_status(M_BUSY);
     // vTaskDelay(5000);
     // motor_move(120000);
 
@@ -279,7 +307,7 @@ int main(){
     register_queue = xQueueCreate(256, sizeof(reg_update));
 
     xTaskCreate(heartbeat, "LED_Task",256,NULL,1,NULL);
-    xTaskCreate(motor_cycle, "Move Motor",256,NULL,tskIDLE_PRIORITY+3,NULL);
+    // xTaskCreate(motor_cycle, "Move Motor",256,NULL,tskIDLE_PRIORITY+3,NULL);
     //This task handles all of the writes to the registers in a single queue
     xTaskCreate(update_registers, "Update Registers",256,NULL,tskIDLE_PRIORITY+4,NULL);
     //Contains the state machine that controlls the SPI communication
