@@ -18,12 +18,11 @@ typedef enum {
         IRQ_EDGE_RISE =  0x8
 } irq_event_t;
 
+
 const uint8_t PHA_PIN = 5;
 const uint8_t PHB_PIN = 4;
-
 const uint8_t CT1_PIN = 6;
 const uint8_t CT2_PIN = 7;
-
 
 
 const uint8_t PULSE_PIN = 0;
@@ -94,7 +93,7 @@ static void _pidPositionServo( void *notUsed )
     while(1){
         xQueueReceive(motorInstruction, &status, portMAX_DELAY);
         // printf("Speed: ")
-        for(;status == M_BUSY;)
+        for(int i = 0; status == M_BUSY;)
         {
             int error = _motorSetpointPosition - _encoder;
             integral = integral + error*dt;
@@ -106,13 +105,13 @@ static void _pidPositionServo( void *notUsed )
             motorDrive(drive);
             previous_error = error;
 
-#if 0   
+#if 1   
             //
             // This printf is very noisy but gives a good picture of the drive (-99 -- 99) 
             // during tuning  It also takes a fair amount of time to process and can screw up the dt 
             // timing of the PID loop.
             //
-            if(i == 0) {
+            if(i%1001 == 0) {
                 printf("  !! sp:%d, mp:%d, d:%d, e:%d, t:%u, v: output: %lf\n", 
                     _motorSetpointPosition, 
                     _encoder, 
@@ -134,7 +133,7 @@ static void _pidPositionServo( void *notUsed )
 }
 
 
-void motor_init(double setKp, double setKi, double setKd)
+void motor_init(double setKp, double setKi, double setKd, bool enableISR)
 {
     printf("%s: \n", __func__);
 
@@ -152,8 +151,10 @@ void motor_init(double setKp, double setKi, double setKd)
     gpio_init(CT2_PIN);
     gpio_set_dir(CT2_PIN, GPIO_OUT);    
 
-    gpio_set_irq_enabled_with_callback(PHA_PIN, GPIO_IRQ_EDGE_RISE|GPIO_IRQ_EDGE_FALL, true, &phase_change_irq);    
-    gpio_set_irq_enabled(PHB_PIN, GPIO_IRQ_EDGE_RISE|GPIO_IRQ_EDGE_FALL, true);    
+    if(enableISR){
+        gpio_set_irq_enabled_with_callback(PHA_PIN, GPIO_IRQ_EDGE_RISE|GPIO_IRQ_EDGE_FALL, true, &phase_change_irq);    
+        gpio_set_irq_enabled(PHB_PIN, GPIO_IRQ_EDGE_RISE|GPIO_IRQ_EDGE_FALL, true);    
+    }
 
     motorInstruction = xQueueCreate(256, sizeof(motor_status_t));
 
@@ -166,16 +167,13 @@ void motor_init(double setKp, double setKi, double setKd)
     Kp = setKp; Ki = setKi; Kd = setKd;
 
 
-#if 1
+
     xTaskCreate(_pidPositionServo,
                 "bid",
                 1024,   
                 NULL,
                 tskIDLE_PRIORITY+2, 
                 NULL );        
-#endif
-
-
 }
 
 

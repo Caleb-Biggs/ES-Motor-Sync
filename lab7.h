@@ -96,10 +96,10 @@ typedef struct REG_UPDATE { uint8_t* reg; uint8_t val; REG_ARG arg; } reg_update
 void hardware_init();
 void heartbeat(void * notUsed);
 void gpio_int_callback(uint gpio, uint32_t events);
+void motor_cycle(void* notUsed);
 
 //Master Functions
 void master_spi(void* notUsed);
-void motor_cycle(void* notUsed);
 
 //Slave Functions
 void slave_state(void* notUsed);

@@ -9,11 +9,13 @@
 #include "pwm.h"
 #include "lab7.h"
 
+//TODO: Fix Master LED behavior
+
 
 /****************\
 |Master Functions|
 \****************/
-#if 1
+#if 0
 
 const uint8_t NEXT_POS = 0;
 const uint8_t PREV_POS = 1;
@@ -25,8 +27,7 @@ static QueueHandle_t SPIQueue;
 int main(){
     stdio_init_all();
     hardware_init();
-    motor_init(0.8, 0, 0); // Master Motor
-    // motor_init(0.85, 0, 0); //Slave Motor
+    motor_init(0.8, 0, 0);
 
     positionQueue = xQueueCreate(256, sizeof(uint8_t));
     SPIQueue = xQueueCreate(256, sizeof(spi_send));
@@ -256,6 +257,9 @@ void switch_handler(void* args){
 \****************/
 #else
 
+const uint8_t PHA = 5;
+const uint8_t PHB = 4;
+
 #define DEBUG 0
 uint8_t test;
 
@@ -264,23 +268,38 @@ static QueueHandle_t register_queue;
 
 int main(){
 	stdio_init_all();
+    motor_init(0.85, 0, 0, false); //Slave Motor
     hardware_init();
-    // motor_init();
+
+    set_motor_status(M_BUSY);
+    // vTaskDelay(5000);
+    // motor_move(120000);
 
     instructionQueue = xQueueCreate(256, 1);
     register_queue = xQueueCreate(256, sizeof(reg_update));
 
     xTaskCreate(heartbeat, "LED_Task",256,NULL,1,NULL);
-
+    xTaskCreate(motor_cycle, "Move Motor",256,NULL,tskIDLE_PRIORITY+3,NULL);
     //This task handles all of the writes to the registers in a single queue
-    xTaskCreate(update_registers, "Update Registers",256,NULL,2,NULL);
-
+    xTaskCreate(update_registers, "Update Registers",256,NULL,tskIDLE_PRIORITY+4,NULL);
     //Contains the state machine that controlls the SPI communication
-    xTaskCreate(slave_state, "Slave State",256,NULL,3,NULL);
+    xTaskCreate(slave_state, "Slave State",256,NULL,tskIDLE_PRIORITY+5,NULL);
 
     vTaskStartScheduler();
 
     while(1);
+}
+
+
+void motor_cycle(void* notUsed){
+	const uint8_t NUM_POSITIONS = 9;
+	int32_t positions[] = {0, 435, 870, 1305, 1740, 3480, 5220, -5220, -3480};
+
+	for(int i = 0;; i = (i+1)%NUM_POSITIONS){
+		motor_move(positions[i]);
+		vTaskDelay(2000);
+	}
+
 }
 
 
@@ -299,6 +318,9 @@ void hardware_init(){
     init_helper(CLK_PIN, GPIO_IN, true);
     init_helper(MOSI_PIN, GPIO_IN, false);
     init_helper(MISO_PIN, GPIO_OUT, false);
+
+    gpio_set_irq_enabled_with_callback(PHA, GPIO_IRQ_EDGE_RISE|GPIO_IRQ_EDGE_FALL, true, &gpio_int_callback);    
+    gpio_set_irq_enabled(PHB, GPIO_IRQ_EDGE_RISE|GPIO_IRQ_EDGE_FALL, true);    
 }
 
 
@@ -462,7 +484,6 @@ void update_registers(void* notUsed){
 ////////////////////
 //Interrupts////////
 
-uint8_t test = 1;
 void gpio_int_callback(uint gpio, uint32_t events_unused) {
     uint8_t state;
     BaseType_t yield = pdFALSE;
@@ -481,6 +502,7 @@ void gpio_int_callback(uint gpio, uint32_t events_unused) {
             	if(yield) taskYIELD();
             }
             break;
+        case PHA: case PHB: phase_change_irq(gpio, events_unused); break;
     }
 }
 
