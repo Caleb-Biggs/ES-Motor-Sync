@@ -77,6 +77,9 @@ const int8_t ERR_GET_BYTE = -11;
 const int8_t ERR_REGISTER = -12;
 
 
+typedef struct SPI_SEND { uint8_t byte1; uint8_t byte2; } spi_send;
+void send_motor_cmd(uint32_t pos);
+
 //Slave SPI Instructions
 const uint8_t CSL_INST = 0x10;
 const uint8_t CSH_INST = 0x20;

@@ -19,6 +19,7 @@ const uint8_t NEXT_POS = 0;
 const uint8_t PREV_POS = 1;
 const uint8_t STOP_POS = 2;
 static QueueHandle_t positionQueue;
+static QueueHandle_t SPIQueue;
 
 
 int main(){
@@ -28,6 +29,7 @@ int main(){
     // motor_init(0.85, 0, 0); //Slave Motor
 
     positionQueue = xQueueCreate(256, sizeof(uint8_t));
+    SPIQueue = xQueueCreate(256, sizeof(spi_send));
 
     xTaskCreate(heartbeat, "LED_Task", 256, NULL, tskIDLE_PRIORITY, NULL);
     xTaskCreate(motor_cycle, "Motor_Task",256,NULL,tskIDLE_PRIORITY+3,NULL);
@@ -104,17 +106,17 @@ void motor_cycle(void* notUsed){
 					set_motor_status(M_BUSY);
 					ext_LED(GRN_LED_PIN);
 					i = (i+1)%NUM_POSITIONS;
-					motor_move(positions[i]);
+					send_motor_cmd(positions[i]);
 					break;
 				case PREV_POS: 
 					set_motor_status(M_BUSY);
 					i = (i-1+NUM_POSITIONS)%NUM_POSITIONS; //adding NUM_POSITIONS ensures value stays positive
-					motor_move(positions[i]);
+					send_motor_cmd(positions[i]);
 					break;
 				case STOP_POS:
 					set_motor_status(M_IDLE);
 					ext_LED(RED_LED_PIN);
-					motor_move(motor_get_position());
+					send_motor_cmd(motor_get_position());
 					break;
 			}
 		}
@@ -124,6 +126,20 @@ void motor_cycle(void* notUsed){
 
 ////////////////////
 //SPI Functions/////
+
+void send_motor_cmd(uint32_t pos){
+	// xQueueSendToBack(SPIQueue, &((spi_send){MOTOR_CMD_0, pos&0xFF}), portMAX_DELAY);
+	// xQueueSendToBack(SPIQueue, &((spi_send){MOTOR_CMD_8, (pos>>8)&0xFF}), portMAX_DELAY);
+	// xQueueSendToBack(SPIQueue, &((spi_send){MOTOR_CMD_16, (pos>>16)&0xFF}), portMAX_DELAY);
+	// xQueueSendToBack(SPIQueue, &((spi_send){MOTOR_CMD_24, (pos>>24)&0xFF}), portMAX_DELAY);
+	xQueueSendToBack(SPIQueue, &((spi_send){LED_REG|WRITE_COM, pos&0xFF}), portMAX_DELAY);
+	xQueueSendToBack(SPIQueue, &((spi_send){LED_REG|WRITE_COM, (pos>>8)&0xFF}), portMAX_DELAY);
+	xQueueSendToBack(SPIQueue, &((spi_send){LED_REG|WRITE_COM, (pos>>16)&0xFF}), portMAX_DELAY);
+	xQueueSendToBack(SPIQueue, &((spi_send){LED_REG|WRITE_COM, (pos>>24)&0xFF}), portMAX_DELAY);
+	//TODO: More
+	motor_move(pos);
+}
+
 
 //8 Got no errors with no delay between commands in the master and
 //Set to 80 for debugging purposes
@@ -172,13 +188,13 @@ uint8_t send_command(uint8_t byte1, uint8_t byte2){
 
 
 void master_spi(void* notUsed){
+	spi_send command;
+	//Send pointless command to ensure they're in sync
+	send_command(LED_REG|WRITE_COM, 0);
 	while(1){
-		send_command(LED_REG|WRITE_COM, 0xF0);
-        // printf("Wrote 1s: %b\n", send_command(LED_REG|READ_COM,0));
-        vTaskDelay(500);
-        send_command(LED_REG|WRITE_COM, 0x00);
-        // printf("Wrote 0s: %b\n", send_command(LED_REG|READ_COM,0));
-        vTaskDelay(500);
+		xQueueReceive(SPIQueue, &command, portMAX_DELAY);
+		printf("Byte 1: %8b; Byte 2: %8b\n", command.byte1, command.byte2);
+		send_command(command.byte1, command.byte2);
 	}
 }
 
@@ -208,12 +224,10 @@ void switch_handler(void* args){
 	const uint8_t pollRate = 30;
 	sw_state state = SW_NONE;
 	bool change = false;
+
 	for(int i = 0;;){
 		switch(state){
-			case SW_NONE:
-				if(change) printf("Both released\n");
-				change = switch_state_change(&state, 0, SW_1, 0, SW_2);
-				break;
+			case SW_NONE: change = switch_state_change(&state, 0, SW_1, 0, SW_2); break;
 			case SW_1:
 				if(change) xQueueSendToBack(positionQueue, &NEXT_POS, portMAX_DELAY);
 				change = switch_state_change(&state, 1, SW_NONE, 0, SW_BOTH);
