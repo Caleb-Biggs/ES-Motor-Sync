@@ -28,18 +28,20 @@ const uint8_t INT_REG = 0x30; //0b 0011 0000
     const uint8_t EN_SW1_INT = 1<<2; //Enable switch 1 interrupt
     const uint8_t EN_SW2_INT = 1<<3; //Enable switch 2 interrupt
 
-const uint8_t MOTOR_POS_0 = 0;
-const uint8_t MOTOR_POS_8 = 1;
-const uint8_t MOTOR_POS_16 = 2;
-const uint8_t MOTOR_POS_24 = 3;
+const uint8_t MOTOR_POS_0 = 0<<4;
+const uint8_t MOTOR_POS_8 = 1<<4;
+const uint8_t MOTOR_POS_16 = 2<<4;
+const uint8_t MOTOR_POS_24 = 3<<4;
 
-const uint8_t MOTOR_CMD_0 = 4;
-const uint8_t MOTOR_CMD_8 = 5;
-const uint8_t MOTOR_CMD_16 = 6;
-const uint8_t MOTOR_CMD_24 = 7;
+const uint8_t MOTOR_CMD_0 = 4<<4;
+const uint8_t MOTOR_CMD_8 = 5<<4;
+const uint8_t MOTOR_CMD_16 = 6<<4;
+const uint8_t MOTOR_CMD_24 = 7<<4;
 
-const uint8_t CMD_REG = 10;
-const uint8_t STAT_REG = 11;
+const uint8_t CMD_REG = 10<<4;
+    const uint8_t GET_MOTOR_POS = 1;
+    const uint8_t SET_MOTOR_POS = 1<<1;
+const uint8_t STAT_REG = 11<<4;
 
 
 //Pins
@@ -89,7 +91,7 @@ const uint8_t CLKH_INST = 0x40;
 
 typedef enum STATE {IDLE_S, COMMAND_S, READ_S, WRITE_S, DONE_S} STATE;
 typedef enum REG_ARG { READ_REG, OVERWRITE_REG, AND_REG, OR_REG } REG_ARG;
-typedef struct REG_UPDATE { uint8_t* reg; uint8_t val; REG_ARG arg; } reg_update;
+typedef struct REG_UPDATE { uint8_t* regArr; uint8_t reg; uint8_t val; REG_ARG arg; } reg_update;
 
 
 //Shared Functions
@@ -101,6 +103,7 @@ void motor_cycle(void* notUsed);
 //Master Functions
 void master_spi(void* notUsed);
 void ext_LED(void* notUsed);
+void monitor_slave(void* notUsed);
 
 //Slave Functions
 void slave_state(void* notUsed);

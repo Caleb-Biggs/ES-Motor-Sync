@@ -5,6 +5,8 @@
 #include <semphr.h>
 #include "hardware/gpio.h"
 #include "pico/stdlib.h"
+#include "hardware/watchdog.h"
+#include "hardware/structs/watchdog.h"
 #include "motor.h"
 #include "pwm.h"
 #include "lab7.h"
@@ -15,14 +17,16 @@
 /****************\
 |Master Functions|
 \****************/
-#if 1
+#if 0
 
 const uint8_t NEXT_POS = 0;
 const uint8_t PREV_POS = 1;
 const uint8_t STOP_POS = 2;
+
 static QueueHandle_t positionQueue;
 static QueueHandle_t SPIQueue;
 static QueueHandle_t LEDQueue;
+static QueueHandle_t SPIReadQueue;
 
 typedef struct LED_BEHAVIOR { bool R, G, B; uint8_t freq; float duty; bool doStop; } led_behavior;
 
@@ -34,16 +38,36 @@ int main(){
 
     positionQueue = xQueueCreate(256, sizeof(uint8_t));
     SPIQueue = xQueueCreate(256, sizeof(spi_send));
+    SPIReadQueue = xQueueCreate(256, sizeof(uint8_t));
     LEDQueue = xQueueCreate(256, sizeof(led_behavior));
 
     xTaskCreate(heartbeat, "LED_Task", 256, NULL, tskIDLE_PRIORITY, NULL);
     xTaskCreate(ext_LED, "External LED", 256, NULL, tskIDLE_PRIORITY+1, NULL);
+    xTaskCreate(monitor_slave, "Nanny", 256, NULL, tskIDLE_PRIORITY+1, NULL);
     xTaskCreate(motor_cycle, "Motor_Task",256,NULL,tskIDLE_PRIORITY+3,NULL);
     xTaskCreate(master_spi, "Master SPI", 256, NULL, tskIDLE_PRIORITY+4, NULL);
     xTaskCreate(switch_handler, "Switches", 256, &(sw_args){SW1_PIN}, tskIDLE_PRIORITY+5, NULL);
     vTaskStartScheduler();
 
     while(1);
+}
+
+
+void monitor_slave(void* notUsed){
+	const uint16_t WAIT = 20;
+	uint8_t buffer;
+	//Waits for a signal from motor_cycle to indicate the motor has started
+	xQueueReceive(SPIReadQueue, &buffer, portMAX_DELAY);
+	while(1){
+		xQueueSendToBack(SPIQueue, &((spi_send){STAT_REG|READ_COM, 0}), portMAX_DELAY);
+		BaseType_t received = xQueueReceive(SPIReadQueue, &buffer, WAIT);
+		if(received == pdFALSE || buffer != 1){
+			printf("Buffer = %i\n", buffer);
+			xQueueSendToBack(LEDQueue, &((led_behavior){0, 1, 0, 10, 0.1, false}), portMAX_DELAY);
+		} else xQueueSendToBack(LEDQueue, &((led_behavior){0, 1, 0, 10, 0.9, false}), portMAX_DELAY);
+		printf("monitor: %8b\n", buffer);
+		vTaskDelay(2000);
+	}
 }
 
 
@@ -121,11 +145,11 @@ void motor_cycle(void* notUsed){
 	const uint8_t NUM_POSITIONS = 9;
 	int32_t positions[] = {0, 435, 870, 1305, 1740, 3480, 5220, -5220, -3480};
 	int32_t setPos = 0;
+	bool firstComm = true;
 	for(int i = 0;;){
 		do{ xQueueReceive(positionQueue, &posInst, portMAX_DELAY); } 
 		while(posInst != NEXT_POS);
 		xQueueSendToBack(LEDQueue, &((led_behavior){1, 0, 0, 10, 0.5, true}), portMAX_DELAY);
-		// ext_LED(GRN_LED_PIN);
 		while(posInst != STOP_POS){
 			xQueueReceive(positionQueue, &posInst, portMAX_DELAY);
 			switch(posInst){
@@ -134,17 +158,18 @@ void motor_cycle(void* notUsed){
 					xQueueSendToBack(LEDQueue, &((led_behavior){1, 0, 0, 10, 0.5, true}), portMAX_DELAY);
 					i = (i+1)%NUM_POSITIONS;
 					send_motor_cmd(setPos = positions[i]);
+					if(firstComm){ xQueueSendToBack(SPIReadQueue, &posInst, portMAX_DELAY); firstComm = false; }
 					break;
 				case PREV_POS: 
 					set_motor_status(M_BUSY);
 					xQueueSendToBack(LEDQueue, &((led_behavior){1, 0, 0, 10, 0.5, true}), portMAX_DELAY);
 					i = (i-1+NUM_POSITIONS)%NUM_POSITIONS; //adding NUM_POSITIONS ensures value stays positive
 					send_motor_cmd(setPos = positions[i]);
+					if(firstComm){ xQueueSendToBack(SPIReadQueue, &posInst, portMAX_DELAY); firstComm = false; }
 					break;
 				case STOP_POS:
 					set_motor_status(M_IDLE);
-					//xQueueSendToBack(LEDQueue, &((led_behavior){1, 0, 0, 100, 1}), portMAX_DELAY);
-					// ext_LED(RED_LED_PIN);
+					xQueueSendToBack(LEDQueue, &((led_behavior){1, 0, 0, 10, 1, false}), portMAX_DELAY);
 					send_motor_cmd(setPos = motor_get_position());
 					break;
 			}
@@ -157,15 +182,11 @@ void motor_cycle(void* notUsed){
 //SPI Functions/////
 
 void send_motor_cmd(int32_t pos){
-	// xQueueSendToBack(SPIQueue, &((spi_send){MOTOR_CMD_0, pos&0xFF}), portMAX_DELAY);
-	// xQueueSendToBack(SPIQueue, &((spi_send){MOTOR_CMD_8, (pos>>8)&0xFF}), portMAX_DELAY);
-	// xQueueSendToBack(SPIQueue, &((spi_send){MOTOR_CMD_16, (pos>>16)&0xFF}), portMAX_DELAY);
-	// xQueueSendToBack(SPIQueue, &((spi_send){MOTOR_CMD_24, (pos>>24)&0xFF}), portMAX_DELAY);
-	xQueueSendToBack(SPIQueue, &((spi_send){LED_REG|WRITE_COM, pos&0xFF}), portMAX_DELAY);
-	xQueueSendToBack(SPIQueue, &((spi_send){LED_REG|WRITE_COM, (pos>>8)&0xFF}), portMAX_DELAY);
-	xQueueSendToBack(SPIQueue, &((spi_send){LED_REG|WRITE_COM, (pos>>16)&0xFF}), portMAX_DELAY);
-	xQueueSendToBack(SPIQueue, &((spi_send){LED_REG|WRITE_COM, (pos>>24)&0xFF}), portMAX_DELAY);
-	//TODO: More
+	xQueueSendToBack(SPIQueue, &((spi_send){MOTOR_CMD_0|WRITE_COM, pos&0xFF}), portMAX_DELAY);
+	xQueueSendToBack(SPIQueue, &((spi_send){MOTOR_CMD_8|WRITE_COM, (pos>>8)&0xFF}), portMAX_DELAY);
+	xQueueSendToBack(SPIQueue, &((spi_send){MOTOR_CMD_16|WRITE_COM, (pos>>16)&0xFF}), portMAX_DELAY);
+	xQueueSendToBack(SPIQueue, &((spi_send){MOTOR_CMD_24|WRITE_COM, (pos>>24)&0xFF}), portMAX_DELAY);
+	xQueueSendToBack(SPIQueue, &((spi_send){CMD_REG|WRITE_COM, SET_MOTOR_POS}), portMAX_DELAY);
 	motor_move(pos);
 }
 
@@ -223,7 +244,8 @@ void master_spi(void* notUsed){
 	while(1){
 		xQueueReceive(SPIQueue, &command, portMAX_DELAY);
 		printf("Byte 1: %8b; Byte 2: %8b\n", command.byte1, command.byte2);
-		send_command(command.byte1, command.byte2);
+		uint8_t output = send_command(command.byte1, command.byte2);
+		if(command.byte1&READ_COM) xQueueSendToBack(SPIReadQueue, &output, portMAX_DELAY);
 	}
 }
 
@@ -293,21 +315,23 @@ uint8_t test;
 
 static QueueHandle_t instructionQueue;
 static QueueHandle_t register_queue;
+static QueueHandle_t positionQueue;
 
 int main(){
 	stdio_init_all();
     motor_init(0.85, 0, 0, false); //Slave Motor
     hardware_init();
 
-    // set_motor_status(M_BUSY);
-    // vTaskDelay(5000);
-    // motor_move(120000);
+    watchdog_start_tick(12);
+	watchdog_enable(200000, false);
+	printf(" WatchDog has been initialized\n");
 
     instructionQueue = xQueueCreate(256, 1);
     register_queue = xQueueCreate(256, sizeof(reg_update));
+    positionQueue = xQueueCreate(256, sizeof(int32_t));
 
     xTaskCreate(heartbeat, "LED_Task",256,NULL,1,NULL);
-    // xTaskCreate(motor_cycle, "Move Motor",256,NULL,tskIDLE_PRIORITY+3,NULL);
+    xTaskCreate(motor_cycle, "Move Motor",256,NULL,tskIDLE_PRIORITY+3,NULL);
     //This task handles all of the writes to the registers in a single queue
     xTaskCreate(update_registers, "Update Registers",256,NULL,tskIDLE_PRIORITY+4,NULL);
     //Contains the state machine that controlls the SPI communication
@@ -320,12 +344,12 @@ int main(){
 
 
 void motor_cycle(void* notUsed){
-	const uint8_t NUM_POSITIONS = 9;
-	int32_t positions[] = {0, 435, 870, 1305, 1740, 3480, 5220, -5220, -3480};
-
-	for(int i = 0;; i = (i+1)%NUM_POSITIONS){
-		motor_move(positions[i]);
-		vTaskDelay(2000);
+	int32_t nextPos;
+	while(1){
+		xQueueReceive(positionQueue, &nextPos, portMAX_DELAY);
+		// printf("BIN: %32b; DEC: %i\n", nextPos, nextPos);
+		set_motor_status(M_BUSY);
+		motor_move(nextPos);
 	}
 
 }
@@ -354,6 +378,7 @@ void hardware_init(){
 
 void heartbeat(void * notUsed){
     while(1){
+    	watchdog_update();
         gpio_put(LED_PIN, 1);
         vTaskDelay(750);
         gpio_put(LED_PIN, 0);
@@ -394,12 +419,18 @@ int8_t idle_state(STATE* state){
 int8_t command_state(uint8_t* byte_1, STATE* state){
 	if(DEBUG) printf("%s\n", __func__);
 	int8_t error = get_byte(byte_1);
-	if(error) return ERR_GET_COMM;
+	if(error) {
+		printf("A\n");
+		return ERR_GET_COMM;
+	}
+
 	switch((*byte_1)&0x0F){
 		case READ_COM: *state = READ_S; break;
 		case WRITE_COM: *state = WRITE_S; break;
 		case TESTING_COM: while(1); //For testing watchdog
-		default: return ERR_GET_COMM;
+		default: 
+			printf("B\n");
+			return ERR_GET_COMM;
 	}
 	return 0;
 }
@@ -444,7 +475,6 @@ void done_state(int8_t* error, STATE* state){
 
 
 void error_check(int8_t* code, STATE* state){
-	//TODO: Remove unused error codes and give them more useful messages
 	switch(*code){
         case 0: break;
         case ERR_GET_COMM: printf("ERR_GET_COMM\n"); break;
@@ -468,6 +498,7 @@ void slave_state(void* notUsed){
 	enum STATE state = IDLE_S;
 	uint8_t byte_1;
 	int8_t error = 0;
+
 	while(1){
 		switch(state){
 			case IDLE_S: error = idle_state(&state); break;
@@ -486,10 +517,9 @@ void slave_state(void* notUsed){
 
 
 uint8_t registers(REG_ARG mode, uint8_t reg, uint8_t val){
-	static uint8_t registers[3] = {0};
-    uint8_t index = ((reg)>>4)-1;
-    if(mode == READ_REG) return registers[index];
-    reg_update update = {&(registers[index]), val, mode};
+	static uint8_t registers[12] = {0};
+    if(mode == READ_REG) return registers[reg>>4];
+    reg_update update = {registers, reg&0xF0, val, mode};
     xQueueSendToBack(register_queue, &update, portMAX_DELAY);
     return 0;
 }
@@ -499,10 +529,32 @@ void update_registers(void* notUsed){
 	reg_update update;
 	while(1){
 		xQueueReceive(register_queue, &update, portMAX_DELAY);
+		uint8_t index = update.reg>>4;
 		switch(update.arg){
-			case OVERWRITE_REG: *(update.reg) = update.val; break;
-			case OR_REG: *(update.reg) |= update.val; break;
-			case AND_REG: *(update.reg) &= update.val; break;
+			case OVERWRITE_REG: update.regArr[index] = update.val; break;
+			case OR_REG: update.regArr[index] |= update.val; break;
+			case AND_REG: update.regArr[index] &= update.val; break;
+			default: break;
+		}
+		switch(update.reg){
+			case CMD_REG: 
+				if(update.val&SET_MOTOR_POS){
+					int32_t pos = 
+						update.regArr[MOTOR_CMD_0>>4] |
+						update.regArr[MOTOR_CMD_8>>4]<<8 |
+						update.regArr[MOTOR_CMD_16>>4]<<16 |
+						update.regArr[MOTOR_CMD_24>>4]<<24;
+					xQueueSendToBack(positionQueue, &pos, portMAX_DELAY);
+					update.regArr[STAT_REG>>4] = 1;
+				}
+				if(update.val&GET_MOTOR_POS){
+					int32_t currPos = motor_get_position();
+					update.regArr[MOTOR_POS_0] = currPos & 0xFF;
+					update.regArr[MOTOR_POS_8] = (currPos>>8) & 0xFF;
+					update.regArr[MOTOR_POS_16] = (currPos>>16) & 0xFF;
+					update.regArr[MOTOR_POS_24] = (currPos>>24) & 0xFF;
+				}
+				break;
 			default: break;
 		}
 	}
